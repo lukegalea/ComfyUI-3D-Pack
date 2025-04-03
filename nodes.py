@@ -7,6 +7,7 @@ from collections import OrderedDict
 import folder_paths as comfy_paths
 from omegaconf import OmegaConf
 import json
+import time
 
 import torch
 from torch.utils.data import DataLoader
@@ -15,6 +16,9 @@ import torchvision.transforms.functional as TF
 import numpy as np
 from safetensors.torch import load_file
 from einops import rearrange
+
+import numpy as np
+from plyfile import PlyElement, PlyData
 
 from diffusers import (
     DiffusionPipeline, 
@@ -4061,13 +4065,16 @@ class Trellis_Structured_3D_Latents_Models:
                 "sparse_structure_sample_steps": ("INT", {"default": 12, "min": 1}),
                 "structured_latent_guidance_scale": ("FLOAT", {"default": 3.0, "min": 0.0, "step": 0.01}),
                 "structured_latent_sample_steps": ("INT", {"default": 12, "min": 1}),
+                "generate_mesh": ("BOOLEAN", {"default": False}),  # Added boolean parameter
             }
         }
     
     RETURN_TYPES = (
+        "STRING",
         "MESH",
     )
     RETURN_NAMES = (
+        "ply_path",
         "mesh",
     )
     FUNCTION = "run_model"
@@ -4084,6 +4091,7 @@ class Trellis_Structured_3D_Latents_Models:
         sparse_structure_sample_steps,
         structured_latent_guidance_scale,
         structured_latent_sample_steps,
+        generate_mesh,
     ):
         single_image = torch_imgs_to_pils(reference_image, reference_mask)[0]
 
@@ -4103,20 +4111,43 @@ class Trellis_Structured_3D_Latents_Models:
                 },
             )
 
-            # GLB files can be extracted from the outputs
-            vertices, faces, uvs, texture = postprocessing_utils.finalize_mesh(
-                outputs['gaussian'][0],
-                outputs['mesh'][0],
-                # Optional parameters
-                simplify=0.95,          # Ratio of triangles to remove in the simplification process
-                texture_size=1024,      # Size of the texture used for the GLB
-            )
+            gaussian = outputs['gaussian'][0]            
+            output_dir = comfy_paths.get_output_directory()
+            timestamp = str(int(time.time() * 1000))  # Convert to integer to avoid decimal
+            gaussian_path = os.path.join(output_dir, f"{timestamp}.ply")
+            gaussian.save_ply(gaussian_path)
 
-            vertices, faces, uvs, texture = torch.from_numpy(vertices).to(DEVICE), torch.from_numpy(faces).to(torch.int64).to(DEVICE), torch.from_numpy(uvs).to(DEVICE), torch.from_numpy(texture).to(DEVICE)
-            mesh = Mesh(v=vertices, f=faces, vt=uvs, ft=faces, albedo=texture, device=DEVICE)
-            mesh.auto_normal()
+            # # Always generate Draco compressed version
+            # draco_encoder_path = "draco/build/draco_encoder"
+            # drc_path = os.path.join(output_dir, f"{timestamp}.drc")
+            
+            # try:
+            #     subprocess.run(
+            #         [draco_encoder_path, "-i", gaussian_path, "-o", drc_path, "-cl", "10"],
+            #         check=True,
+            #         stdout=subprocess.DEVNULL,
+            #         stderr=subprocess.DEVNULL
+            #     )
+            # except Exception as e:
+            #     print(f"Draco compression failed: {str(e)}")
+            #     drc_path = ""
 
-        return (mesh,)
+            mesh = None
+            if generate_mesh:  # Conditional mesh generation                
+                # GLB files can be extracted from the outputs
+                vertices, faces, uvs, texture = postprocessing_utils.finalize_mesh(
+                    outputs['gaussian'][0],
+                    outputs['mesh'][0],
+                    # Optional parameters
+                    simplify=0.95,          # Ratio of triangles to remove in the simplification process
+                    texture_size=2048,      # Size of the texture used for the GLB
+                )
+    
+                vertices, faces, uvs, texture = torch.from_numpy(vertices).to(DEVICE), torch.from_numpy(faces).to(torch.int64).to(DEVICE), torch.from_numpy(uvs).to(DEVICE), torch.from_numpy(texture).to(DEVICE)
+                mesh = Mesh(v=vertices, f=faces, vt=uvs, ft=faces, albedo=texture, device=DEVICE)
+                mesh.auto_normal()            
+
+        return (gaussian_path, mesh,)        
     
 
     
