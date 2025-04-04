@@ -20,6 +20,7 @@ from einops import rearrange
 import numpy as np
 from plyfile import PlyElement, PlyData
 
+
 from diffusers import (
     DiffusionPipeline, 
     StableDiffusionPipeline
@@ -4071,11 +4072,11 @@ class Trellis_Structured_3D_Latents_Models:
     
     RETURN_TYPES = (
         "STRING",
-        "MESH",
+        "STRING",
     )
     RETURN_NAMES = (
         "ply_path",
-        "mesh",
+        "mesh_path",
     )
     FUNCTION = "run_model"
     CATEGORY = "Comfy3D/Algorithm"
@@ -4117,37 +4118,25 @@ class Trellis_Structured_3D_Latents_Models:
             gaussian_path = os.path.join(output_dir, f"{timestamp}.ply")
             gaussian.save_ply(gaussian_path)
 
-            # # Always generate Draco compressed version
-            # draco_encoder_path = "draco/build/draco_encoder"
-            # drc_path = os.path.join(output_dir, f"{timestamp}.drc")
-            
-            # try:
-            #     subprocess.run(
-            #         [draco_encoder_path, "-i", gaussian_path, "-o", drc_path, "-cl", "10"],
-            #         check=True,
-            #         stdout=subprocess.DEVNULL,
-            #         stderr=subprocess.DEVNULL
-            #     )
-            # except Exception as e:
-            #     print(f"Draco compression failed: {str(e)}")
-            #     drc_path = ""
-
-            mesh = None
+            mesh_path = ""
             if generate_mesh:  # Conditional mesh generation                
                 # GLB files can be extracted from the outputs
                 vertices, faces, uvs, texture = postprocessing_utils.finalize_mesh(
                     outputs['gaussian'][0],
                     outputs['mesh'][0],
                     # Optional parameters
-                    simplify=0.95,          # Ratio of triangles to remove in the simplification process
-                    texture_size=2048,      # Size of the texture used for the GLB
+                    simplify=0.90,          # Ratio of triangles to remove in the simplification process
+                    texture_size=1024,      # Size of the texture used for the GLB
                 )
     
                 vertices, faces, uvs, texture = torch.from_numpy(vertices).to(DEVICE), torch.from_numpy(faces).to(torch.int64).to(DEVICE), torch.from_numpy(uvs).to(DEVICE), torch.from_numpy(texture).to(DEVICE)
                 mesh = Mesh(v=vertices, f=faces, vt=uvs, ft=faces, albedo=texture, device=DEVICE)
-                mesh.auto_normal()            
+                mesh.auto_normal()
+                
+                # Save mesh as GLB
+                mesh_path = os.path.join(output_dir, f"{timestamp}.glb")
+                mesh.write(mesh_path)
 
-        return (gaussian_path, mesh,)        
-    
+        return (gaussian_path, mesh_path,)
 
     
